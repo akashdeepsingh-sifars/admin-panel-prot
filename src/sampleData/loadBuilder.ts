@@ -1,4 +1,5 @@
 import { distToPolylineM, haversineM, mulberry32, offsetLatLng, pointAtFraction } from '../lib/geo';
+import { uuidFor } from '../lib/ids';
 import type {
   Break,
   DriverAssignment,
@@ -17,7 +18,6 @@ import type {
   Stop,
   StopKind,
 } from '../types';
-import { flagPings } from './analyze';
 import { CARRIERS, DRIVERS, SHIPPERS } from './people';
 
 export type GapCause = 'offline' | 'battery_dead' | 'permission_revoked' | 'park';
@@ -61,7 +61,16 @@ export interface LoadSpec {
   carrierIdx: number;
   driverId: string;
   // Mid-transit change: driver parks, carrier releases and assigns, new driver resumes.
-  reassign?: { atFrac: number; toDriverId: string; reason: string; parkMinutes: number; resumeOffsetKm?: number };
+  // Several entries mean several changes (A to B to C), in order of atFrac.
+  reassigns?: {
+    atFrac: number;
+    toDriverId: string;
+    reason: string;
+    parkMinutes: number;
+    resumeOffsetKm?: number;
+    // A driver offered the shipment during the park who declined and never drove.
+    declinedDuringPark?: { driverId: string; reason: string };
+  }[];
   // Before pickup: the first driver declined after accepting and the carrier assigned driverId.
   preReassign?: { fromDriverId: string; declineReason: string };
   gaps?: GapSpec[];
@@ -69,6 +78,7 @@ export interface LoadSpec {
   offRoute?: OffRouteSpec[];
   dupAtFrac?: number[];
   dupTsAtFrac?: number[];
+  resendAtFrac?: number[];
   lateMinutes?: number;
   fenceMissedDelivery?: boolean;
   notifyGapPickupExit?: boolean;
@@ -135,7 +145,7 @@ export function buildLoad(spec: LoadSpec): Load {
   // A park (driver change) pauses the truck exactly like a break: it resumes from the same spot.
   const pauseSpecs = [
     ...(spec.frozen ?? []).filter((f) => f.kind === 'break').map((b) => ({ atFrac: b.atFrac, minutes: b.minutes, kind: 'break' as 'break' | 'park' })),
-    ...(spec.reassign ? [{ atFrac: spec.reassign.atFrac, minutes: spec.reassign.parkMinutes, kind: 'park' as 'break' | 'park' }] : []),
+    ...(spec.reassigns ?? []).map((r) => ({ atFrac: r.atFrac, minutes: r.parkMinutes, kind: 'park' as 'break' | 'park' })),
   ];
   let prior = 0;
   const breakWindows = [...pauseSpecs]
@@ -151,16 +161,21 @@ export function buildLoad(spec: LoadSpec): Load {
   const stuckWindows = (spec.frozen ?? [])
     .filter((f) => f.kind === 'stuck')
     .map((f) => ({ startT: DWELL_MIN + f.atFrac * D + totalBreak * f.atFrac, minutes: f.minutes, atFrac: f.atFrac }));
-  const parkWindow = breakWindows.find((w) => w.kind === 'park');
-  const handoverT = parkWindow ? parkWindow.startT : Infinity;
-  const handoverGap = parkWindow ? parkWindow.minutes : 0;
+  const reassigns = [...(spec.reassigns ?? [])].sort((a, b) => a.atFrac - b.atFrac);
+  // Park windows come out in the same order as the sorted reassigns.
+  const parkWindows = breakWindows.filter((w) => w.kind === 'park').map((w, i) => ({ ...w, reassign: reassigns[i] }));
+  const driverAtT = (t: number): string => {
+    let d = spec.driverId;
+    for (const w of parkWindows) if (t >= w.startT + w.minutes) d = w.reassign.toDriverId;
+    return d;
+  };
   const gapWindows = [
     ...(spec.gaps ?? []).map((g) => ({
       startT: DWELL_MIN + g.startFrac * D + totalBreak * g.startFrac,
       minutes: g.minutes,
       cause: g.cause,
     })),
-    ...(handoverGap > 0 ? [{ startT: handoverT, minutes: handoverGap, cause: 'park' as GapCause }] : []),
+    ...parkWindows.map((w) => ({ startT: w.startT, minutes: w.minutes, cause: 'park' as GapCause })),
   ];
 
   const fractionAt = (t: number): number => {
@@ -202,9 +217,9 @@ export function buildLoad(spec: LoadSpec): Load {
         const w = Math.sin((Math.PI * (f - off.fromFrac)) / (off.toFrac - off.fromFrac));
         loc = offsetLatLng(p, off.offsetKm * w, 90);
       }
-      const hEnd = handoverT + handoverGap;
-      if (spec.reassign?.resumeOffsetKm && t >= hEnd && t < hEnd + 6) {
-        loc = offsetLatLng(p, spec.reassign.resumeOffsetKm * (1 - (t - hEnd) / 6), 90);
+      const resumed = parkWindows.find((w) => w.reassign.resumeOffsetKm && t >= w.startT + w.minutes && t < w.startT + w.minutes + 6);
+      if (resumed) {
+        loc = offsetLatLng(p, (resumed.reassign.resumeOffsetKm ?? 0) * (1 - (t - (resumed.startT + resumed.minutes)) / 6), 90);
       }
       const inBreak = breakWindows.some((w) => t >= w.startT && t < w.startT + w.minutes);
       const jitter = inBreak ? 0.00002 : 0.0003;
@@ -226,7 +241,7 @@ export function buildLoad(spec: LoadSpec): Load {
     const recordedAtMs = startMs + t * MIN;
     raw.push({
       id: `${spec.key}-r${seq++}`,
-      driverId: spec.reassign && t >= handoverT ? spec.reassign.toDriverId : spec.driverId,
+      driverId: driverAtT(t),
       recordedAtMs,
       receivedAtMs: recordedAtMs + (offline ? (3 + rnd() * 5) * MIN : (1 + rnd() * 2) * 1000),
       location: loc,
@@ -251,6 +266,10 @@ export function buildLoad(spec: LoadSpec): Load {
       raw.push({ ...src, id: `${spec.key}-r${seq++}`, receivedAtMs: src.receivedAtMs + n * 3000 });
     }
   }
+  for (const frac of spec.resendAtFrac ?? []) {
+    const src = raw[nearestIdx(frac)];
+    raw.push({ ...src, id: `${spec.key}-r${seq++}`, receivedAtMs: src.receivedAtMs + 10 * MIN, offlineQueued: true });
+  }
   for (const frac of spec.dupTsAtFrac ?? []) {
     const src = raw[nearestIdx(frac)];
     raw.push({
@@ -270,7 +289,7 @@ export function buildLoad(spec: LoadSpec): Load {
   const deliveryEndMs = late > 0 ? deliveryArrivalMs - late * MIN : deliveryArrivalMs + 45 * MIN;
   const stops: Stop[] = [
     {
-      id: `${spec.key}-stop-1`,
+      id: uuidFor(`${spec.key}-stop-1`),
       kind: 'pickup',
       dcName: spec.pickup.name,
       address: spec.pickup.address,
@@ -282,7 +301,7 @@ export function buildLoad(spec: LoadSpec): Load {
       departedAt: null,
     },
     {
-      id: `${spec.key}-stop-2`,
+      id: uuidFor(`${spec.key}-stop-2`),
       kind: 'delivery',
       dcName: spec.delivery.name,
       address: spec.delivery.address,
@@ -299,13 +318,12 @@ export function buildLoad(spec: LoadSpec): Load {
   const pings: Ping[] = raw.map((r, i) => {
     const dPick = haversineM(r.location, pickupLoc);
     const dDel = haversineM(r.location, deliveryLoc);
-    const offRouteM = distToPolylineM(r.location, route);
     let context: PingContext;
-    if (dPick <= STOP_RADIUS_M) context = 'pickup_radius';
-    else if (dDel <= STOP_RADIUS_M) context = 'delivery_radius';
-    else context = offRouteM > OFF_ROUTE_THRESHOLD_M ? 'off_route' : 'on_route';
+    if (dPick <= STOP_RADIUS_M) context = 'pickup';
+    else if (dDel <= STOP_RADIUS_M) context = 'delivery';
+    else context = 'normal';
     return {
-      id: `${spec.key}-p${i + 1}`,
+      id: uuidFor(`${spec.key}-ping-${i + 1}`),
       driverId: r.driverId,
       recordedAt: iso(r.recordedAtMs),
       receivedAt: iso(r.receivedAtMs),
@@ -313,16 +331,14 @@ export function buildLoad(spec: LoadSpec): Load {
       accuracyM: r.accuracyM,
       offlineQueued: r.offlineQueued,
       context,
-      offRouteM: Math.round(offRouteM),
       nearestStopId: dPick <= dDel ? stops[0].id : stops[1].id,
       phone: r.phone,
-      flags: [],
     };
   });
 
   // Geofence crossings derived from pings.
   const geofenceEvents: GeofenceEvent[] = [];
-  const stopCtx: Record<string, PingContext> = { [stops[0].id]: 'pickup_radius', [stops[1].id]: 'delivery_radius' };
+  const stopCtx: Record<string, PingContext> = { [stops[0].id]: 'pickup', [stops[1].id]: 'delivery' };
   for (const stop of stops) {
     let inside = false;
     let entered = false;
@@ -335,12 +351,12 @@ export function buildLoad(spec: LoadSpec): Load {
         stop.arrivedAt = p.recordedAt;
         const missed = spec.fenceMissedDelivery && stop.kind === 'delivery';
         if (!missed) {
-          geofenceEvents.push({ id: `${stop.id}-enter`, stopId: stop.id, transition: 'enter', occurredAt: p.recordedAt, notified: true });
+          geofenceEvents.push({ id: uuidFor(`${stop.id}-enter`), stopId: stop.id, transition: 'enter', occurredAt: p.recordedAt, notified: true });
         }
       } else if (!isIn && entered && !stop.departedAt) {
         stop.departedAt = p.recordedAt;
         geofenceEvents.push({
-          id: `${stop.id}-exit`,
+          id: uuidFor(`${stop.id}-exit`),
           stopId: stop.id,
           transition: 'exit',
           occurredAt: p.recordedAt,
@@ -373,8 +389,8 @@ export function buildLoad(spec: LoadSpec): Load {
     else context = offRoute > OFF_ROUTE_THRESHOLD_M ? 'elsewhere' : 'on_route';
     const expectedCtx: PhotoContext = ps.stopKind === 'pickup' ? 'at_pickup' : 'at_delivery';
     return {
-      id: `${spec.key}-ph${i + 1}`,
-      driverId: spec.reassign && at >= startMs + (handoverT + handoverGap) * MIN ? spec.reassign.toDriverId : spec.driverId,
+      id: uuidFor(`${spec.key}-ph${i + 1}`),
+      driverId: driverAtT((at - startMs) / MIN),
       kind: ps.kind,
       uploadedAt: iso(at),
       location: loc,
@@ -393,7 +409,7 @@ export function buildLoad(spec: LoadSpec): Load {
   const breakList: Break[] = breakWindows.filter((w) => w.kind === 'break').map((w, i) => {
     const p = pointAtFraction(route, w.atFrac);
     return {
-      id: `${spec.key}-brk${i + 1}`,
+      id: uuidFor(`${spec.key}-brk${i + 1}`),
       startedAt: iso(startMs + w.startT * MIN),
       endedAt: iso(startMs + (w.startT + w.minutes) * MIN),
       location: { lat: p.lat, lng: p.lng },
@@ -403,7 +419,7 @@ export function buildLoad(spec: LoadSpec): Load {
     const t = DWELL_MIN + spec.problem.atFrac * D + totalBreak * spec.problem.atFrac;
     const p = pointAtFraction(route, spec.problem.atFrac);
     problems.push({
-      id: `${spec.key}-prob1`,
+      id: uuidFor(`${spec.key}-prob1`),
       type: spec.problem.type,
       reportedAt: iso(startMs + t * MIN),
       location: { lat: p.lat, lng: p.lng },
@@ -413,7 +429,7 @@ export function buildLoad(spec: LoadSpec): Load {
     });
     if (spec.problem.type === 'accident' || spec.problem.type === 'breakdown') {
       breakList.push({
-        id: `${spec.key}-brk-incident`,
+        id: uuidFor(`${spec.key}-brk-incident`),
         startedAt: iso(startMs + t * MIN),
         endedAt: iso(startMs + (t + 25) * MIN),
         location: { lat: p.lat, lng: p.lng },
@@ -432,15 +448,22 @@ export function buildLoad(spec: LoadSpec): Load {
   }
   let finalDriverId = spec.driverId;
   const parks: Park[] = [];
-  if (spec.reassign && parkWindow) {
-    const parkedMs = startMs + parkWindow.startT * MIN;
-    const at = pointAtFraction(route, parkWindow.atFrac);
-    parks.push({ id: `${spec.key}-park1`, parkedAt: iso(parkedMs), resumedAt: iso(parkedMs + parkWindow.minutes * MIN), location: { lat: at.lat, lng: at.lng }, note: 'Parked by driver', cargoOnBoard: true });
-    assignments[assignments.length - 1].to = iso(parkedMs + 2 * MIN);
-    assignments[assignments.length - 1].endedBy = 'released';
-    assignments.push({ driverId: spec.reassign.toDriverId, from: iso(parkedMs + 4 * MIN), to: null, reason: spec.reassign.reason, kind: 'replacement_mid_transit', endedBy: null });
-    finalDriverId = spec.reassign.toDriverId;
-  }
+  parkWindows.forEach((w, i) => {
+    const parkedMs = startMs + w.startT * MIN;
+    const at = pointAtFraction(route, w.atFrac);
+    parks.push({ id: uuidFor(`${spec.key}-park${i + 1}`), parkedAt: iso(parkedMs), resumedAt: iso(parkedMs + w.minutes * MIN), location: { lat: at.lat, lng: at.lng }, note: 'Parked by driver', cargoOnBoard: true });
+    // The driver who was on the load stops here; the carrier releases them after the park.
+    const current = [...assignments].reverse().find((a) => a.endedBy !== 'declined');
+    if (current) {
+      current.to = iso(parkedMs + 2 * MIN);
+      current.endedBy = 'released';
+    }
+    if (w.reassign.declinedDuringPark) {
+      assignments.push({ driverId: w.reassign.declinedDuringPark.driverId, from: iso(parkedMs + 4 * MIN), to: iso(parkedMs + 9 * MIN), reason: `Declined during the park: ${w.reassign.declinedDuringPark.reason}`, kind: 'replacement_mid_transit', endedBy: 'declined' });
+    }
+    assignments.push({ driverId: w.reassign.toDriverId, from: iso(parkedMs + (w.reassign.declinedDuringPark ? 12 : 4) * MIN), to: null, reason: w.reassign.reason, kind: 'replacement_mid_transit', endedBy: null });
+    finalDriverId = w.reassign.toDriverId;
+  });
 
   const shipper = SHIPPERS[spec.shipperIdx];
   const carrier = CARRIERS[spec.carrierIdx];
@@ -458,9 +481,9 @@ export function buildLoad(spec: LoadSpec): Load {
     equipment: spec.equipment,
     createdBy: { name: shipper.contact.name, at: iso(startMs - 72 * 60 * MIN) },
     bids: [
-      { id: `${spec.key}-b1`, carrierName: CARRIERS[1 - spec.carrierIdx].name, amountUsd: 2350 + Math.round(rnd() * 300), placedAt: iso(startMs - 60 * 60 * MIN), outcome: 'rejected' },
-      { id: `${spec.key}-b2`, carrierName: carrier.name, amountUsd: 2150 + Math.round(rnd() * 200), placedAt: iso(startMs - 58 * 60 * MIN), outcome: 'accepted' },
-      { id: `${spec.key}-b3`, carrierName: CARRIERS[1 - spec.carrierIdx].name, amountUsd: 2500, placedAt: iso(startMs - 40 * 60 * MIN), outcome: 'expired' },
+      { id: uuidFor(`${spec.key}-b1`), carrierName: CARRIERS[1 - spec.carrierIdx].name, amountUsd: 2350 + Math.round(rnd() * 300), placedAt: iso(startMs - 60 * 60 * MIN), outcome: 'rejected' },
+      { id: uuidFor(`${spec.key}-b2`), carrierName: carrier.name, amountUsd: 2150 + Math.round(rnd() * 200), placedAt: iso(startMs - 58 * 60 * MIN), outcome: 'accepted' },
+      { id: uuidFor(`${spec.key}-b3`), carrierName: CARRIERS[1 - spec.carrierIdx].name, amountUsd: 2500, placedAt: iso(startMs - 40 * 60 * MIN), outcome: 'expired' },
     ],
     acceptedBy: { name: shipper.contact.name, at: iso(acceptedAt) },
     shipper,
@@ -480,5 +503,5 @@ export function buildLoad(spec: LoadSpec): Load {
     deliveryMarkedDistanceM: markedLoc ? Math.round(haversineM(markedLoc, deliveryLoc)) : null,
     lateMinutes: delivered ? late : 0,
   };
-  return flagPings(load);
+  return load;
 }

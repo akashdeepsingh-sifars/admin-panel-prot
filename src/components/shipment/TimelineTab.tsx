@@ -1,10 +1,10 @@
 import { AlertTriangle, Bell, Camera, CheckCircle2, Circle, MapPin, PauseCircle, RadioTower, UserCog } from 'lucide-react';
 import { fmtDateTime } from '../../lib/format';
-import { buildTimeline } from '../../lib/timeline';
+import { buildTimeline, pathSegments } from '../../lib/timeline';
 import type { TimelineKind } from '../../lib/timeline';
-import { analyzeLoad } from '../../sampleData/analyze';
+import { DRIVERS } from '../../sampleData';
 import type { Load } from '../../types';
-import { Card, CardHeader, cx } from '../ui';
+import { Card, CardHeader, Chip, Table, Td, cx } from '../ui';
 
 const ICON: Record<TimelineKind, typeof Circle> = {
   lifecycle: Circle,
@@ -26,47 +26,31 @@ const TONE: Record<string, string> = {
   neutral: 'text-muted-foreground border-border-strong',
 };
 
+const SEG_LABEL = { pickup: 'At pickup geofence', normal: 'Normal pings', delivery: 'At drop-off geofence' } as const;
+const SEG_TONE = { pickup: 'ok', normal: 'medium', delivery: 'high' } as const;
+
 export function TimelineTab({ load, onFocus }: { load: Load; onFocus: (pingIds: string[], photoId?: string) => void }): JSX.Element {
   const events = buildTimeline(load);
-  const a = analyzeLoad(load);
-  const start = new Date(load.pings[0].recordedAt).getTime();
-  const end = new Date(load.pings[load.pings.length - 1].recordedAt).getTime();
-  const span = Math.max(end - start, 1);
-  const pos = (iso: string): number => Math.max(0, Math.min(100, ((new Date(iso).getTime() - start) / span) * 100));
-  const width = (a: string, b: string): number => Math.max(0.4, pos(b) - pos(a));
+  const segments = pathSegments(load);
+  const driver = (id: string): string => DRIVERS.find((d) => d.id === id)?.name ?? id;
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader title="Trip strip" sub="Time flows left to right across the whole trip. Red = GPS silent, amber = break/stop, blue = shipment parked (driver change), green = time inside a stop radius." />
-        <div className="p-4">
-          <div className="relative h-10 border border-border-strong bg-muted">
-            {load.stops.map((s) =>
-              s.arrivedAt ? (
-                <div key={s.id} className="absolute top-0 h-full bg-lime-tint" style={{ left: `${pos(s.arrivedAt)}%`, width: `${width(s.arrivedAt, s.departedAt ?? load.pings[load.pings.length - 1].recordedAt)}%` }} title={s.dcName} />
-              ) : null
-            )}
-            {a.gaps.map((g, i) => (
-              <div key={i} className="absolute top-0 h-full bg-destructive" style={{ left: `${pos(g.before.recordedAt)}%`, width: `${width(g.before.recordedAt, g.after.recordedAt)}%` }} title={`GPS silent ${g.minutes} min`} />
-            ))}
-            {load.breaks.map((b) => (
-              <div key={b.id} className="absolute top-2 h-6 bg-warning" style={{ left: `${pos(b.startedAt)}%`, width: `${width(b.startedAt, b.endedAt)}%` }} title="Break" />
-            ))}
-            {load.parks.map((pk) => (
-              <div key={pk.id} className="absolute top-0 h-full bg-navy/60" style={{ left: `${pos(pk.parkedAt)}%`, width: `${width(pk.parkedAt, pk.resumedAt ?? pk.parkedAt)}%` }} title="Shipment parked" />
-            ))}
-            {load.problems.map((p) => (
-              <div key={p.id} className="absolute top-0 h-full w-1 bg-navy-dark" style={{ left: `${pos(p.reportedAt)}%` }} title={`Problem: ${p.type}`} />
-            ))}
-            {load.photos.map((p) => (
-              <div key={p.id} className={cx('absolute bottom-0 h-3 w-1.5', p.onTime ? 'bg-navy' : 'bg-warning')} style={{ left: `${pos(p.uploadedAt)}%` }} title="Photo" />
-            ))}
-          </div>
-          <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-            <span>{fmtDateTime(load.pings[0].recordedAt)}</span>
-            <span>{fmtDateTime(load.pings[load.pings.length - 1].recordedAt)}</span>
-          </div>
-        </div>
+        <CardHeader title="Path followed" sub="The route the GPS pings actually took, in order. Each stretch is either pings from the pickup geofence, normal pings, or pings from the drop-off geofence." />
+        <Table head={['From', 'To', 'Where', 'Pings', 'Driver']}>
+          {segments.map((sg, i) => (
+            <tr key={i}>
+              <Td className="whitespace-nowrap">{fmtDateTime(sg.from)}</Td>
+              <Td className="whitespace-nowrap">{fmtDateTime(sg.to)}</Td>
+              <Td>
+                <Chip tone={SEG_TONE[sg.context]}>{SEG_LABEL[sg.context]}</Chip>
+              </Td>
+              <Td>{sg.pings}</Td>
+              <Td>{sg.driverIds.map(driver).join(', ')}</Td>
+            </tr>
+          ))}
+        </Table>
       </Card>
 
       <Card>

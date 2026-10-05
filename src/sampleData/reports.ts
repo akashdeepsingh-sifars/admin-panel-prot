@@ -1,5 +1,5 @@
 import { mulberry32 } from '../lib/geo';
-import type { ApiReport, Channel, GpsReport, MessagingReport, RateLimitEvent } from '../types';
+import type { ApiReport, Channel, MessagingReport, RateLimitEvent } from '../types';
 
 export function makeApiReport(seed: number, requests: number, hours: number, endISO: string): ApiReport {
   const rnd = mulberry32(seed);
@@ -129,13 +129,4 @@ export function makeMessagingReport(seed: number, end: string): MessagingReport 
     }))
   );
   return { totals: { sent, delivered: sent - failed, failed }, byChannel, failureReasons, failedItems };
-}
-
-export function makeGpsReport(): GpsReport {
-  return {
-    drift: [
-      { driverId: 'drv-2', device: 'Galaxy A14 · Android 13', expectedIntervalS: 60, actualIntervalS: 148, affectedFrom: '2026-09-28T06:00:00.000Z', affectedTo: '2026-09-28T14:00:00.000Z', loadIds: ['L4', 'L5'] },
-      { driverId: 'drv-4', device: 'iPhone 12 · iOS 17', expectedIntervalS: 60, actualIntervalS: 96, affectedFrom: '2026-09-28T17:00:00.000Z', affectedTo: '2026-09-28T18:30:00.000Z', loadIds: ['L3'] },
-    ],
-  };
 }

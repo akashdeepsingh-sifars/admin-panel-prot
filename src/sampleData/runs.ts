@@ -1,52 +1,48 @@
-import type { ApiReport, DiagnosisRun, Finding, FindingReview, MessagingReport, RunReports, RunScope, Schedule, TargetLabel } from '../types';
-import { driverDrafts, shipmentDrafts } from './analyze';
+import type { ApiReport, DiagnosisRun, Finding, MessagingReport, RunKind, RunReports } from '../types';
+import { shipmentDrafts } from './analyze';
 import type { FindingDraft } from './analyze';
 import { LOADS } from './loads';
 import { NOW } from './people';
-import { makeApiReport, makeGpsReport, makeMessagingReport } from './reports';
+import { makeApiReport, makeMessagingReport } from './reports';
 
 interface RunDef {
   id: string;
-  trigger: 'manual' | 'scheduled';
-  scopes: RunScope[];
-  targets: TargetLabel[];
-  windowStart: string;
-  windowEnd: string;
+  kind: RunKind;
+  loadId?: string;
+  windowStart?: string;
+  windowEnd?: string;
   status: DiagnosisRun['status'];
   createdAt: string;
   durationSec: number | null;
   createdBy: string;
-  scheduleId?: string;
-  loadIds?: string[];
-  driverIds?: string[];
   error?: string;
 }
 
-const allLoadIds = LOADS.map((l) => l.id);
 const W24 = { windowStart: '2026-09-28T00:00:00.000Z', windowEnd: '2026-09-29T00:00:00.000Z' };
 
+// One shipment run diagnoses exactly one load.
 const DEFS: RunDef[] = [
-  { id: 'R-1043', trigger: 'manual', scopes: ['shipments'], targets: [{ scope: 'shipments', label: 'Load FF-10260' }], windowStart: '2026-09-28T12:00:00.000Z', windowEnd: NOW, status: 'running', createdAt: '2026-09-29T11:58:00.000Z', durationSec: null, createdBy: 'Bharat Shah', loadIds: ['L3'] },
-  { id: 'R-1042', trigger: 'manual', scopes: ['shipments'], targets: [{ scope: 'shipments', label: 'Load FF-10245' }], windowStart: '2026-09-28T08:00:00.000Z', windowEnd: '2026-09-28T14:00:00.000Z', status: 'completed', createdAt: '2026-09-29T10:12:00.000Z', durationSec: 41, createdBy: 'Bharat Shah', loadIds: ['L2'] },
-  { id: 'R-1041', trigger: 'manual', scopes: ['driver'], targets: [{ scope: 'driver', label: 'Driver: Ivan Petrov' }], windowStart: '2026-09-01T00:00:00.000Z', windowEnd: NOW, status: 'completed', createdAt: '2026-09-29T09:30:00.000Z', durationSec: 63, createdBy: 'Akashdeep Singh', driverIds: ['drv-2'] },
-  { id: 'R-1040', trigger: 'scheduled', scopes: ['shipments'], targets: [{ scope: 'shipments', label: 'All loads in window' }], ...W24, status: 'completed', createdAt: '2026-09-29T02:00:00.000Z', durationSec: 212, createdBy: 'Scheduler', scheduleId: 'SCH-1', loadIds: allLoadIds },
-  { id: 'R-1039', trigger: 'manual', scopes: ['shipments', 'api', 'notifications'], targets: [{ scope: 'shipments', label: 'Driver Lena Ortiz’s loads' }], windowStart: '2026-09-28T00:00:00.000Z', windowEnd: '2026-09-29T00:00:00.000Z', status: 'completed', createdAt: '2026-09-29T08:45:00.000Z', durationSec: 118, createdBy: 'Rhea Kapoor', loadIds: ['L3', 'L8', 'L9'] },
-  { id: 'R-1038', trigger: 'scheduled', scopes: ['api'], targets: [], windowStart: '2026-09-29T10:00:00.000Z', windowEnd: '2026-09-29T11:00:00.000Z', status: 'completed', createdAt: '2026-09-29T11:00:00.000Z', durationSec: 9, createdBy: 'Scheduler', scheduleId: 'SCH-2' },
-  { id: 'R-1037', trigger: 'manual', scopes: ['notifications'], targets: [], windowStart: '2026-09-28T00:00:00.000Z', windowEnd: '2026-09-29T00:00:00.000Z', status: 'completed', createdAt: '2026-09-29T07:20:00.000Z', durationSec: 14, createdBy: 'Bharat Shah' },
-  { id: 'R-1036', trigger: 'manual', scopes: ['gps'], targets: [], windowStart: '2026-09-28T00:00:00.000Z', windowEnd: '2026-09-29T00:00:00.000Z', status: 'completed', createdAt: '2026-09-29T07:05:00.000Z', durationSec: 22, createdBy: 'Bharat Shah' },
-  { id: 'R-1035', trigger: 'manual', scopes: ['shipments'], targets: [{ scope: 'shipments', label: 'Load FF-10231' }], windowStart: '2026-09-28T12:00:00.000Z', windowEnd: '2026-09-28T18:00:00.000Z', status: 'completed', createdAt: '2026-09-29T06:40:00.000Z', durationSec: 17, createdBy: 'Rhea Kapoor', loadIds: ['L1'] },
-  { id: 'R-1034', trigger: 'manual', scopes: ['shipments', 'driver'], targets: [{ scope: 'shipments', label: 'All loads in window' }, { scope: 'driver', label: 'Driver: Marcus Reed' }], ...W24, status: 'failed', createdAt: '2026-09-28T22:10:00.000Z', durationSec: 30, createdBy: 'Akashdeep Singh', loadIds: allLoadIds, driverIds: ['drv-1'], error: 'Diagnosis worker lost database connection after 30 s (ECONNRESET). No findings were written.' },
-  { id: 'R-1033', trigger: 'scheduled', scopes: ['api'], targets: [], windowStart: '2026-09-29T12:00:00.000Z', windowEnd: '2026-09-29T13:00:00.000Z', status: 'scheduled', createdAt: '2026-09-29T11:00:00.000Z', durationSec: null, createdBy: 'Scheduler', scheduleId: 'SCH-2' },
+  { id: 'R-1050', kind: 'shipment', loadId: 'L9', status: 'completed', createdAt: '2026-09-29T11:40:00.000Z', durationSec: 19, createdBy: 'Rhea Kapoor' },
+  { id: 'R-1049', kind: 'shipment', loadId: 'L8', status: 'completed', createdAt: '2026-09-29T11:20:00.000Z', durationSec: 24, createdBy: 'Rhea Kapoor' },
+  { id: 'R-1048', kind: 'shipment', loadId: 'L7', status: 'completed', createdAt: '2026-09-29T11:00:00.000Z', durationSec: 22, createdBy: 'Bharat Shah' },
+  { id: 'R-1047', kind: 'shipment', loadId: 'L5', status: 'completed', createdAt: '2026-09-29T10:50:00.000Z', durationSec: 31, createdBy: 'Bharat Shah' },
+  { id: 'R-1046', kind: 'shipment', loadId: 'L4', status: 'completed', createdAt: '2026-09-29T10:30:00.000Z', durationSec: 28, createdBy: 'Akashdeep Singh' },
+  { id: 'R-1052', kind: 'shipment', loadId: 'L10', status: 'completed', createdAt: '2026-09-29T12:05:00.000Z', durationSec: 33, createdBy: 'Bharat Shah' },
+  { id: 'R-1051', kind: 'shipment', loadId: 'L3', status: 'completed', createdAt: '2026-09-29T11:50:00.000Z', durationSec: 27, createdBy: 'Rhea Kapoor' },
+  { id: 'R-1043', kind: 'shipment', loadId: 'L3', status: 'running', createdAt: '2026-09-29T11:58:00.000Z', durationSec: null, createdBy: 'Bharat Shah' },
+  { id: 'R-1042', kind: 'shipment', loadId: 'L2', status: 'completed', createdAt: '2026-09-29T10:12:00.000Z', durationSec: 41, createdBy: 'Bharat Shah' },
+  { id: 'R-1041', kind: 'shipment', loadId: 'L6', status: 'completed', createdAt: '2026-09-29T09:30:00.000Z', durationSec: 63, createdBy: 'Akashdeep Singh' },
+  { id: 'R-1039', kind: 'api', ...W24, status: 'completed', createdAt: '2026-09-29T08:45:00.000Z', durationSec: 18, createdBy: 'Rhea Kapoor' },
+  { id: 'R-1038', kind: 'api', windowStart: '2026-09-29T10:00:00.000Z', windowEnd: '2026-09-29T11:00:00.000Z', status: 'completed', createdAt: '2026-09-29T11:00:00.000Z', durationSec: 9, createdBy: 'Bharat Shah' },
+  { id: 'R-1037', kind: 'notifications', ...W24, status: 'completed', createdAt: '2026-09-29T07:20:00.000Z', durationSec: 14, createdBy: 'Bharat Shah' },
+  { id: 'R-1035', kind: 'shipment', loadId: 'L1', status: 'completed', createdAt: '2026-09-29T06:40:00.000Z', durationSec: 17, createdBy: 'Rhea Kapoor' },
+  { id: 'R-1034', kind: 'shipment', loadId: 'L7', status: 'failed', createdAt: '2026-09-28T22:10:00.000Z', durationSec: 30, createdBy: 'Akashdeep Singh', error: 'Diagnosis worker lost database connection after 30 s (ECONNRESET). No findings were written.' },
 ];
 
 const REPORTS: Record<string, RunReports> = {
-  'R-1039': {
-    api: makeApiReport(39, 18420, 24, '2026-09-29T00:00:00.000Z'),
-    messaging: makeMessagingReport(39, '2026-09-29T00:00:00.000Z'),
-  },
+  'R-1039': { api: makeApiReport(39, 18420, 24, '2026-09-29T00:00:00.000Z') },
   'R-1038': { api: makeApiReport(38, 2140, 1, '2026-09-29T11:00:00.000Z') },
   'R-1037': { messaging: makeMessagingReport(37, '2026-09-29T00:00:00.000Z') },
-  'R-1036': { gps: makeGpsReport() },
 };
 
 function apiDrafts(r: ApiReport): FindingDraft[] {
@@ -70,10 +66,6 @@ function messagingDrafts(r: MessagingReport): FindingDraft[] {
     .map((c) => ({ ruleCode: 'MSG_HIGH_FAILURE', severity: 'medium' as const, summary: `${c.channel === 'email' ? 'Email' : 'Push'} failure rate ${((c.failed / c.sent) * 100).toFixed(1)}% (${c.failed} of ${c.sent})`, evidence: { channel: c.channel, failed: c.failed, sent: c.sent }, pingIds: [], photoIds: [] }));
 }
 
-function gpsDrafts(): FindingDraft[] {
-  return makeGpsReport().drift.map((d) => ({ ruleCode: 'SAMPLING_DRIFT', severity: 'medium' as const, driverId: d.driverId, summary: `GPS interval ${d.actualIntervalS}s vs expected ${d.expectedIntervalS}s on ${d.device}`, evidence: { expectedS: d.expectedIntervalS, actualS: d.actualIntervalS, device: d.device }, pingIds: [], photoIds: [] }));
-}
-
 function toFinding(run: Pick<RunDef, 'id' | 'createdAt' | 'durationSec'>, d: FindingDraft, n: number, section: Finding['section']): Finding {
   return {
     id: `${run.id}-F${n}`,
@@ -84,7 +76,6 @@ function toFinding(run: Pick<RunDef, 'id' | 'createdAt' | 'durationSec'>, d: Fin
     detectedAt: new Date(new Date(run.createdAt).getTime() + (run.durationSec ?? 10) * 1000).toISOString(),
     summary: d.summary,
     loadId: d.loadId,
-    driverId: d.driverId,
     evidence: d.evidence,
     pingIds: d.pingIds,
     photoIds: d.photoIds,
@@ -93,29 +84,28 @@ function toFinding(run: Pick<RunDef, 'id' | 'createdAt' | 'durationSec'>, d: Fin
 
 export interface RunInput {
   id: string;
-  scopes: RunScope[];
-  loadIds: string[];
-  driverIds: string[];
+  kind: RunKind;
+  loadId: string | null;
   createdAt: string;
   durationSec: number | null;
-  windowStart: string;
-  windowEnd: string;
+  windowStart: string | null;
+  windowEnd: string | null;
 }
 
-// Runs the same finding logic for a run created in the UI, with freshly generated fleet reports.
+// Runs the same finding logic for a run created in the UI, with freshly generated API / notification reports.
 export function generateResult(run: RunInput): { findings: Finding[]; reports: RunReports } {
   const seed = Number(run.id.replace(/\D/g, '')) || 7;
-  const hours = Math.max(1, Math.round((new Date(run.windowEnd).getTime() - new Date(run.windowStart).getTime()) / 3600000));
+  const end = run.windowEnd ?? NOW;
+  const hours = Math.max(1, Math.round((new Date(end).getTime() - new Date(run.windowStart ?? end).getTime()) / 3600000));
   const reports: RunReports = {};
-  if (run.scopes.includes('api')) reports.api = makeApiReport(seed, Math.min(60000, 800 * hours + 4000), Math.min(hours, 48), run.windowEnd);
-  if (run.scopes.includes('notifications')) reports.messaging = makeMessagingReport(seed, run.windowEnd);
-  if (run.scopes.includes('gps')) reports.gps = makeGpsReport();
+  if (run.kind === 'api') reports.api = makeApiReport(seed, Math.min(60000, 800 * hours + 4000), Math.min(hours, 48), end);
+  if (run.kind === 'notifications') reports.messaging = makeMessagingReport(seed, end);
   return { findings: findingsForInput(run, reports), reports };
 }
 
 function findingsFor(run: RunDef): Finding[] {
   if (run.status !== 'completed') return [];
-  return findingsForInput({ ...run, loadIds: run.loadIds ?? [], driverIds: run.driverIds ?? [] }, REPORTS[run.id]);
+  return findingsForInput({ ...run, loadId: run.loadId ?? null, windowStart: run.windowStart ?? null, windowEnd: run.windowEnd ?? null }, REPORTS[run.id]);
 }
 
 function findingsForInput(run: RunInput, rep: RunReports | undefined): Finding[] {
@@ -124,11 +114,12 @@ function findingsForInput(run: RunInput, rep: RunReports | undefined): Finding[]
   const push = (drafts: FindingDraft[], section: Finding['section']): void => {
     drafts.forEach((d) => out.push(toFinding(run, d, n++, section)));
   };
-  if (run.scopes.includes('shipments')) run.loadIds.forEach((id) => push(shipmentDrafts(LOADS.find((l) => l.id === id)!), 'shipment'));
-  if (run.scopes.includes('driver')) run.driverIds.forEach((id) => push(driverDrafts(id, LOADS), 'driver'));
-  if (run.scopes.includes('api') && rep?.api) push(apiDrafts(rep.api), 'api');
-  if (run.scopes.includes('notifications') && rep?.messaging) push(messagingDrafts(rep.messaging), 'messaging');
-  if (run.scopes.includes('gps')) push(gpsDrafts(), 'gps');
+  if (run.kind === 'shipment' && run.loadId) {
+    const load = LOADS.find((l) => l.id === run.loadId);
+    if (load) push(shipmentDrafts(load), 'shipment');
+  }
+  if (run.kind === 'api' && rep?.api) push(apiDrafts(rep.api), 'api');
+  if (run.kind === 'notifications' && rep?.messaging) push(messagingDrafts(rep.messaging), 'messaging');
   return out;
 }
 
@@ -136,39 +127,17 @@ export const FINDINGS: Finding[] = DEFS.flatMap(findingsFor);
 
 export const RUNS: DiagnosisRun[] = DEFS.map((d) => ({
   id: d.id,
-  trigger: d.trigger,
-  scopes: d.scopes,
-  targets: d.targets,
-  windowStart: d.windowStart,
-  windowEnd: d.windowEnd,
+  kind: d.kind,
+  loadId: d.loadId ?? null,
+  windowStart: d.windowStart ?? null,
+  windowEnd: d.windowEnd ?? null,
   status: d.status,
   createdAt: d.createdAt,
-  startedAt: d.status === 'scheduled' ? null : d.createdAt,
+  startedAt: d.createdAt,
   durationSec: d.durationSec,
   createdBy: d.createdBy,
-  scheduleId: d.scheduleId ?? null,
-  loadIds: d.loadIds ?? [],
-  driverIds: d.driverIds ?? [],
   findingIds: FINDINGS.filter((f) => f.runId === d.id).map((f) => f.id),
   error: d.error,
 }));
 
 export const RUN_REPORTS = REPORTS;
-
-export const SEED_REVIEWS: Record<string, FindingReview> = {
-  'R-1042-F1': {
-    acknowledgedBy: 'Bharat Shah',
-    acknowledgedAt: '2026-09-29T10:30:00.000Z',
-    comments: [
-      { id: 'c1', author: 'Bharat Shah', body: 'Driver confirmed the phone had no network during a rest stop. Coaching scheduled.', at: '2026-09-29T10:31:00.000Z' },
-      { id: 'c2', author: 'Rhea Kapoor', body: 'Checking whether this repeats on other loads for this driver.', at: '2026-09-29T10:45:00.000Z' },
-    ],
-  },
-};
-
-export const SCHEDULES: Schedule[] = [
-  { id: 'SCH-1', name: 'Nightly shipment sweep', scopes: ['shipments'], targets: [{ scope: 'shipments', label: 'All loads in window' }], windowLabel: 'Last 24 h', frequency: { kind: 'daily', timeOfDay: '02:00' }, timezone: 'UTC', nextRunAt: '2026-09-30T02:00:00.000Z', lastRunId: 'R-1040', lastRunAt: '2026-09-29T02:00:00.000Z', enabled: true },
-  { id: 'SCH-2', name: 'Hourly API health', scopes: ['api'], targets: [], windowLabel: 'Last 1 h', frequency: { kind: 'hourly' }, timezone: 'UTC', nextRunAt: '2026-09-29T12:00:00.000Z', lastRunId: 'R-1038', lastRunAt: '2026-09-29T11:00:00.000Z', enabled: true },
-  { id: 'SCH-3', name: 'Weekly driver integrity review', scopes: ['driver'], targets: [{ scope: 'driver', label: 'All drivers with 3+ loads' }], windowLabel: 'Last 30 days', frequency: { kind: 'weekly', timeOfDay: '06:00', daysOfWeek: [1] }, timezone: 'UTC', nextRunAt: '2026-10-05T06:00:00.000Z', lastRunId: null, lastRunAt: null, enabled: true },
-  { id: 'SCH-4', name: 'One-off GPS check after release', scopes: ['gps'], targets: [], windowLabel: 'Last 6 h', frequency: { kind: 'once', runAt: '2026-10-01T09:00:00.000Z' }, timezone: 'UTC', nextRunAt: '2026-10-01T09:00:00.000Z', lastRunId: null, lastRunAt: null, enabled: false },
-];

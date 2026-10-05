@@ -65,6 +65,15 @@ export const DRIVERS: Driver[] = [
     device: 'iPhone 12 · iOS 17',
     shipmentsCompleted: 97,
   },
+  {
+    id: 'drv-5',
+    name: 'Noah Kim',
+    phone: '+1 615 555 0155',
+    email: 'nkim@summithaulage.example',
+    orgId: 'org-c2',
+    device: 'Pixel 7 · Android 14',
+    shipmentsCompleted: 41,
+  },
 ];
 
 export const ADMINS = ['Bharat Shah', 'Akashdeep Singh', 'Rhea Kapoor'];

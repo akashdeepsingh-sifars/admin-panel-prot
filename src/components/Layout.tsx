@@ -1,14 +1,13 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
-import { CalendarClock, Database, ListChecks, PlusCircle } from 'lucide-react';
+import { Database, ListChecks, PlusCircle } from 'lucide-react';
 import { cx } from './ui';
 
 const NEW_RUN = '/diagnostics/runs/new';
 
-// Runs stays highlighted on every run sub-page (run, shipment, driver, API...), but not on New run.
+// Runs stays highlighted on every run sub-page (shipment, API, notifications), but not on New run.
 const NAV: { to: string; label: string; icon: typeof ListChecks; active: (path: string) => boolean }[] = [
   { to: '/diagnostics/runs', label: 'Runs', icon: ListChecks, active: (p) => p.startsWith('/diagnostics/runs') && p !== NEW_RUN },
   { to: NEW_RUN, label: 'New run', icon: PlusCircle, active: (p) => p === NEW_RUN },
-  { to: '/diagnostics/schedules', label: 'Schedules', icon: CalendarClock, active: (p) => p.startsWith('/diagnostics/schedules') },
   { to: '/tables', label: 'Tables', icon: Database, active: (p) => p.startsWith('/tables') },
 ];
 

@@ -1,17 +1,14 @@
-import { Link } from 'react-router-dom';
 import { haversineM } from '../../lib/geo';
-import { fmtDateTime, fmtMeters } from '../../lib/format';
+import { fmtDateTime } from '../../lib/format';
 import { DRIVERS } from '../../sampleData';
 import { analyzeLoad } from '../../sampleData/analyze';
 import type { Load } from '../../types';
 import { Card, CardHeader, Chip, KV, Table, Td } from '../ui';
 
-export function OverviewTab({ load, runId }: { load: Load; runId: string }): JSX.Element {
+export function OverviewTab({ load }: { load: Load }): JSX.Element {
   const a = analyzeLoad(load);
   const drv = (id: string): string => DRIVERS.find((d) => d.id === id)?.name ?? id;
   const finalDriver = DRIVERS.find((d) => d.id === load.finalDriverId);
-  const offRoute = load.pings.filter((p) => p.context === 'off_route');
-  const maxDev = Math.max(0, ...load.pings.map((p) => p.offRouteM));
   let km = 0;
   for (let i = 1; i < load.pings.length; i++) km += haversineM(load.pings[i - 1].location, load.pings[i].location) / 1000;
   const gapMin = a.gaps.reduce((s, g) => s + g.minutes, 0);
@@ -75,7 +72,7 @@ export function OverviewTab({ load, runId }: { load: Load; runId: string }): JSX
       </Card>
 
       <Card>
-        <CardHeader title="Driver" right={finalDriver && <Link to={`/diagnostics/runs/${runId}/drivers/${finalDriver.id}`} className="text-sm font-semibold text-navy hover:underline">Driver history →</Link>} />
+        <CardHeader title="Driver" />
         <div className="px-4 py-2">
           <KV k="Name">{finalDriver?.name}</KV>
           <KV k="Phone">{finalDriver?.phone}</KV>
@@ -85,15 +82,37 @@ export function OverviewTab({ load, runId }: { load: Load; runId: string }): JSX
       </Card>
 
       <Card>
-        <CardHeader title="Path followed" sub="What the driver's GPS actually did compared with the planned route." />
+        <CardHeader title="Path followed" sub="What the driver's GPS actually did." />
         <div className="px-4 py-2">
           <KV k="Distance travelled (from pings)">{km.toFixed(0)} km</KV>
-          <KV k="Pings on planned route">{load.pings.filter((p) => p.context !== 'off_route').length} of {load.pings.length}</KV>
-          <KV k="Off-route pings">{offRoute.length >= 5 ? <span className="text-destructive-ink">{offRoute.length} · max {fmtMeters(maxDev)} away</span> : offRoute.length ? `${offRoute.length} (within GPS noise) · max ${fmtMeters(maxDev)} away` : 'None'}</KV>
+          <KV k="Pings at pickup geofence">{load.pings.filter((p) => p.context === 'pickup').length}</KV>
+          <KV k="Normal pings">{load.pings.filter((p) => p.context === 'normal').length}</KV>
+          <KV k="Pings at drop-off geofence">{load.pings.filter((p) => p.context === 'delivery').length}</KV>
           <KV k="GPS off">{a.gaps.length ? <span className="text-destructive-ink">{a.gaps.length} period(s), {gapMin} min total</span> : 'Never'}</KV>
           <KV k="Stops missed">{stopsMissed.length ? <span className="text-destructive-ink">{stopsMissed.map((s) => s.dcName).join(', ')}: never reached</span> : a.missed.length ? <span className="text-destructive-ink">{a.missed.length} geofence crossing(s) not recorded</span> : 'None'}</KV>
         </div>
       </Card>
+
+      {a.chain.steps.length > 1 && (
+        <Card className="lg:col-span-2">
+          <CardHeader title="Who drove, in order" sub={`${a.chain.steps.length} drivers sent GPS on this shipment (${a.chain.changes} change${a.chain.changes > 1 ? 's' : ''}); it sat parked ${a.chain.totalParkedMinutes} min in total.`} />
+          <div className="p-4">
+            <ol className="flex flex-wrap items-stretch gap-2">
+              {a.chain.steps.map((st, i) => (
+                <li key={`${st.driverId}-${i}`} className="flex items-center gap-2">
+                  <div className="border border-border bg-muted px-3 py-2 text-sm">
+                    <div className="font-semibold">{drv(st.driverId)}</div>
+                    <div className="text-xs text-muted-foreground">{fmtDateTime(st.from)} → {fmtDateTime(st.to)}</div>
+                    <div className="text-xs text-muted-foreground">{st.driveMinutes} min · {st.pings} pings · {st.photos} photo{st.photos === 1 ? '' : 's'}</div>
+                  </div>
+                  {i < a.chain.steps.length - 1 && <span aria-hidden className="text-lg font-semibold text-navy">→</span>}
+                </li>
+              ))}
+            </ol>
+            {a.chain.steps.length >= 3 && <p className="mt-2 text-sm text-warning-ink">Three or more drivers on one shipment is flagged: each change leaves the cargo parked and adds handover risk.</p>}
+          </div>
+        </Card>
+      )}
 
       {a.handovers.length > 0 && (
         <Card className="lg:col-span-2">
@@ -106,6 +125,7 @@ export function OverviewTab({ load, runId }: { load: Load; runId: string }): JSX
                   <Chip tone={h.issues.length ? 'high' : 'ok'}>{h.issues.length ? 'Needs review' : 'Consistent'}</Chip>
                 </div>
                 <p className="mb-2 text-sm">Reason given: {h.reason}</p>
+                {h.declinedDriverIds.length > 0 && <p className="mb-2 text-sm text-muted-foreground">Offered first to {h.declinedDriverIds.map(drv).join(', ')}, who declined and never drove.</p>}
                 <ol className="mb-2 space-y-1 border-l-4 border-navy pl-3 text-sm">
                   <li><span className="font-semibold">Parked</span> {h.park ? fmtDateTime(h.park.parkedAt) : 'never'}{h.park?.cargoOnBoard ? ' · cargo on board' : ''}</li>
                   <li><span className="font-semibold">{drv(h.fromDriverId)} released</span> {fmtDateTime(h.releasedAt)}</li>
@@ -115,7 +135,7 @@ export function OverviewTab({ load, runId }: { load: Load; runId: string }): JSX
                 <div className="bg-muted px-3 py-1">
                   <KV k="Time parked">{h.parkedMinutes} min (limit 120 min)</KV>
                   <KV k="Previous driver's last ping">{h.lastPing ? fmtDateTime(h.lastPing.recordedAt) : '—'}</KV>
-                  <KV k="New driver's first ping">{h.firstPing ? `${fmtDateTime(h.firstPing.recordedAt)} · ${h.firstPing.context.replace('_', ' ')}` : 'Never'}</KV>
+                  <KV k="New driver's first ping">{h.firstPing ? `${fmtDateTime(h.firstPing.recordedAt)} · ${h.firstPing.context === 'normal' ? 'normal ping' : h.firstPing.context === 'pickup' ? 'pickup geofence' : 'drop-off geofence'}` : 'Never'}</KV>
                   <KV k="Distance from the parked spot">{(h.resumeDistanceM / 1000).toFixed(1)} km (limit 1 km)</KV>
                   <KV k="GPS silence after resume">{h.silenceAfterResumeMin} min (limit 15 min)</KV>
                 </div>

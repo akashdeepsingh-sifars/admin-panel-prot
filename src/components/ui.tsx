@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { ChevronRight } from 'lucide-react';
-import type { RunScope, RunStatus, RunTrigger, Severity } from '../types';
+import type { RunStatus, Severity } from '../types';
 
 export function cx(...parts: (string | false | null | undefined)[]): string {
   return parts.filter(Boolean).join(' ');
@@ -35,7 +35,6 @@ export function SeverityMini({ counts }: { counts: Record<Severity, number> }): 
 }
 
 const STATUS: Record<RunStatus, string> = {
-  scheduled: 'bg-navy-tint text-navy-dark border-navy',
   queued: 'bg-muted text-muted-foreground border-border-strong',
   running: 'bg-warning-tint text-warning-ink border-warning',
   completed: 'bg-lime-tint text-lime-dark border-lime-dark',
@@ -45,26 +44,6 @@ const STATUS: Record<RunStatus, string> = {
 
 export function StatusBadge({ status }: { status: RunStatus }): JSX.Element {
   return <span className={cx('inline-block border px-1.5 py-0.5 text-xs font-semibold capitalize', STATUS[status])}>{status}</span>;
-}
-
-export function TriggerBadge({ trigger }: { trigger: RunTrigger }): JSX.Element {
-  return (
-    <span className={cx('inline-block border px-1.5 py-0.5 text-xs font-semibold', trigger === 'manual' ? 'border-border-strong bg-card' : 'border-navy bg-navy text-white')}>
-      {trigger === 'manual' ? 'Manual' : 'Scheduled'}
-    </span>
-  );
-}
-
-export const SCOPE_LABEL: Record<RunScope, string> = {
-  shipments: 'Shipments',
-  driver: 'Driver',
-  api: 'API',
-  gps: 'GPS',
-  notifications: 'Notifications',
-};
-
-export function ScopeBadge({ label }: { label: string }): JSX.Element {
-  return <span className="inline-block border border-border-strong bg-muted px-1.5 py-0.5 text-xs font-medium text-foreground">{label}</span>;
 }
 
 export function Card({ children, className }: { children: ReactNode; className?: string }): JSX.Element {

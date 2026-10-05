@@ -1,8 +1,7 @@
 export type Severity = 'critical' | 'high' | 'medium';
-export type RunTrigger = 'manual' | 'scheduled';
-export type RunScope = 'shipments' | 'driver' | 'api' | 'gps' | 'notifications';
-export type RunStatus = 'scheduled' | 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type FindingSection = 'shipment' | 'driver' | 'api' | 'gps' | 'messaging';
+export type RunKind = 'shipment' | 'api' | 'notifications';
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+export type FindingSection = 'shipment' | 'api' | 'messaging';
 
 export interface LatLng {
   lat: number;
@@ -73,8 +72,8 @@ export interface Stop {
   departedAt: string | null;
 }
 
-export type PingContext = 'on_route' | 'pickup_radius' | 'delivery_radius' | 'off_route';
-export type PingFlag = 'duplicate' | 'frozen' | 'after_gap' | 'low_accuracy' | 'same_timestamp';
+// Where a ping was sent from: inside the pickup geofence, inside the drop-off geofence, or anywhere else.
+export type PingContext = 'pickup' | 'normal' | 'delivery';
 export type NetworkType = 'wifi' | 'cellular' | 'none';
 
 // Only fields the mobile app can read per GPS sample on both Android and iOS.
@@ -97,10 +96,8 @@ export interface Ping {
   accuracyM: number;
   offlineQueued: boolean;
   context: PingContext;
-  offRouteM: number;
   nearestStopId: string | null;
   phone: PhoneState;
-  flags: PingFlag[];
 }
 
 export type PhotoKind = 'pickup_bol' | 'delivery_pod' | 'damage' | 'other';
@@ -148,6 +145,23 @@ export interface GeofenceEvent {
   notified: boolean;
 }
 
+export type NotificationRecipient = 'driver' | 'shipper' | 'carrier';
+export type NotificationStatus = 'delivered' | 'failed' | 'missing';
+export type NotificationType = 'bid_accepted' | 'driver_assigned' | 'driver_replaced' | 'arrived_pickup' | 'left_pickup' | 'arrived_delivery' | 'delivered';
+
+export interface LoadNotification {
+  id: string;
+  type: NotificationType;
+  recipient: NotificationRecipient;
+  recipientName: string;
+  channel: Channel;
+  // When the notification should have gone out (the event time) and when it did, if it did.
+  expectedAt: string;
+  sentAt: string | null;
+  status: NotificationStatus;
+  reason?: string;
+}
+
 export type LoadStatus = 'in_transit' | 'delivered' | 'cancelled';
 
 export interface Load {
@@ -179,13 +193,6 @@ export interface Load {
 
 export type EvidenceValue = string | number | boolean | string[];
 
-export interface FindingComment {
-  id: string;
-  author: string;
-  body: string;
-  at: string;
-}
-
 export interface Finding {
   id: string;
   runId: string;
@@ -195,60 +202,26 @@ export interface Finding {
   detectedAt: string;
   summary: string;
   loadId?: string;
-  driverId?: string;
   evidence: Record<string, EvidenceValue>;
   pingIds: string[];
   photoIds: string[];
 }
 
-export interface FindingReview {
-  acknowledgedBy: string | null;
-  acknowledgedAt: string | null;
-  comments: FindingComment[];
-}
-
-export interface TargetLabel {
-  scope: RunScope;
-  label: string;
-}
-
 export interface DiagnosisRun {
   id: string;
-  trigger: RunTrigger;
-  scopes: RunScope[];
-  targets: TargetLabel[];
-  windowStart: string;
-  windowEnd: string;
+  kind: RunKind;
+  // Shipment runs diagnose exactly one load.
+  loadId: string | null;
+  // Time window applies to API and notification runs only.
+  windowStart: string | null;
+  windowEnd: string | null;
   status: RunStatus;
   createdAt: string;
   startedAt: string | null;
   durationSec: number | null;
   createdBy: string;
-  scheduleId: string | null;
-  loadIds: string[];
-  driverIds: string[];
   findingIds: string[];
   error?: string;
-}
-
-export type Frequency =
-  | { kind: 'once'; runAt: string }
-  | { kind: 'hourly' }
-  | { kind: 'daily'; timeOfDay: string }
-  | { kind: 'weekly'; timeOfDay: string; daysOfWeek: number[] };
-
-export interface Schedule {
-  id: string;
-  name: string;
-  scopes: RunScope[];
-  targets: TargetLabel[];
-  windowLabel: string;
-  frequency: Frequency;
-  timezone: string;
-  nextRunAt: string | null;
-  lastRunId: string | null;
-  lastRunAt: string | null;
-  enabled: boolean;
 }
 
 export interface ApiRouteStat {
@@ -313,24 +286,9 @@ export interface MessagingReport {
   failedItems: FailedMessage[];
 }
 
-export interface GpsDriftRow {
-  driverId: string;
-  device: string;
-  expectedIntervalS: number;
-  actualIntervalS: number;
-  affectedFrom: string;
-  affectedTo: string;
-  loadIds: string[];
-}
-
-export interface GpsReport {
-  drift: GpsDriftRow[];
-}
-
 export interface RunReports {
   api?: ApiReport;
   messaging?: MessagingReport;
-  gps?: GpsReport;
 }
 
 export type CellValue = string | number | boolean | null;
@@ -340,7 +298,6 @@ export interface DbColumn {
   name: string;
   type: ColumnType;
   sensitive?: boolean;
-  locked?: boolean;
 }
 
 export type DbRow = Record<string, CellValue>;
@@ -350,14 +307,4 @@ export interface DbTable {
   description: string;
   columns: DbColumn[];
   rows: DbRow[];
-}
-
-export interface AuditEntry {
-  id: string;
-  at: string;
-  user: string;
-  table: string;
-  rowId: string;
-  action: 'update' | 'delete' | 'write_mode_on' | 'write_mode_off';
-  detail: string;
 }

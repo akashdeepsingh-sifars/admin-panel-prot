@@ -1,15 +1,16 @@
-import type { DbColumn, DbTable } from '../types';
+import { UUID_RE, uuidFor } from '../lib/ids';
+import type { DbColumn, DbRow, DbTable } from '../types';
 import { LOADS } from './loads';
 import { CARRIERS, DRIVERS, SHIPPERS } from './people';
-import { FINDINGS, RUNS, SCHEDULES } from './runs';
+import { FINDINGS, RUNS } from './runs';
 
 const col = (name: string, type: DbColumn['type'] = 'text', extra: Partial<DbColumn> = {}): DbColumn => ({ name, type, ...extra });
-const ID = col('id', 'text', { locked: true });
-const CREATED = col('created_at', 'timestamptz', { locked: true });
+const ID = col('id');
+const CREATED = col('created_at', 'timestamptz');
 
 const orgs = [...SHIPPERS.map((o) => ({ o, kind: 'shipper' })), ...CARRIERS.map((o) => ({ o, kind: 'carrier' }))];
 
-export const DB_TABLES: DbTable[] = [
+const RAW_TABLES: DbTable[] = [
   {
     name: 'organizations',
     description: 'Shippers and carriers',
@@ -52,9 +53,9 @@ export const DB_TABLES: DbTable[] = [
   {
     name: 'driver_locations',
     description: 'Raw GPS pings from driver phones',
-    columns: [ID, col('load_id'), col('driver_user_id'), col('point_lat', 'numeric'), col('point_lng', 'numeric'), col('accuracy_m', 'int'), col('recorded_at', 'timestamptz'), col('received_at', 'timestamptz'), col('was_offline_queued', 'bool'), col('battery_pct', 'int'), col('is_charging', 'bool'), col('power_save', 'bool'), col('network_type'), col('location_permission'), col('quality_status')],
+    columns: [ID, col('load_id'), col('driver_user_id'), col('point_lat', 'numeric'), col('point_lng', 'numeric'), col('accuracy_m', 'int'), col('recorded_at', 'timestamptz'), col('received_at', 'timestamptz'), col('was_offline_queued', 'bool'), col('battery_pct', 'int'), col('is_charging', 'bool'), col('power_save', 'bool'), col('network_type'), col('location_permission'), col('location_context')],
     rows: LOADS.flatMap((l) =>
-      l.pings.map((p) => ({ id: p.id, load_id: l.id, driver_user_id: l.finalDriverId, point_lat: p.location.lat, point_lng: p.location.lng, accuracy_m: p.accuracyM, recorded_at: p.recordedAt, received_at: p.receivedAt, was_offline_queued: p.offlineQueued, battery_pct: p.phone.batteryPct, is_charging: p.phone.charging, power_save: p.phone.powerSave, network_type: p.phone.network, location_permission: p.phone.locationPermission, quality_status: p.flags.includes('duplicate') ? 'duplicate' : 'trusted' }))
+      l.pings.map((p) => ({ id: p.id, load_id: l.id, driver_user_id: p.driverId, point_lat: p.location.lat, point_lng: p.location.lng, accuracy_m: p.accuracyM, recorded_at: p.recordedAt, received_at: p.receivedAt, was_offline_queued: p.offlineQueued, battery_pct: p.phone.batteryPct, is_charging: p.phone.charging, power_save: p.phone.powerSave, network_type: p.phone.network, location_permission: p.phone.locationPermission, location_context: p.context }))
     ),
   },
   {
@@ -72,20 +73,14 @@ export const DB_TABLES: DbTable[] = [
   {
     name: 'diagnosis_runs',
     description: 'One row per diagnosis run',
-    columns: [ID, col('trigger'), col('scopes'), col('status'), col('window_start', 'timestamptz'), col('window_end', 'timestamptz'), col('created_by'), col('schedule_id'), col('error'), CREATED],
-    rows: RUNS.map((r) => ({ id: r.id, trigger: r.trigger, scopes: r.scopes.join(','), status: r.status, window_start: r.windowStart, window_end: r.windowEnd, created_by: r.createdBy, schedule_id: r.scheduleId, error: r.error ?? null, created_at: r.createdAt })),
+    columns: [ID, col('kind'), col('load_id'), col('status'), col('window_start', 'timestamptz'), col('window_end', 'timestamptz'), col('created_by'), col('error'), CREATED],
+    rows: RUNS.map((r) => ({ id: r.id, kind: r.kind, load_id: r.loadId, status: r.status, window_start: r.windowStart, window_end: r.windowEnd, created_by: r.createdBy, error: r.error ?? null, created_at: r.createdAt })),
   },
   {
     name: 'diagnosis_findings',
     description: 'Findings linked to runs (all sections)',
-    columns: [ID, col('run_id'), col('section'), col('rule_code'), col('severity'), col('load_id'), col('driver_id'), col('summary'), col('detected_at', 'timestamptz')],
-    rows: FINDINGS.map((f) => ({ id: f.id, run_id: f.runId, section: f.section, rule_code: f.ruleCode, severity: f.severity, load_id: f.loadId ?? null, driver_id: f.driverId ?? null, summary: f.summary, detected_at: f.detectedAt })),
-  },
-  {
-    name: 'diagnosis_schedules',
-    description: 'Recurring and one-off scheduled runs',
-    columns: [ID, col('name'), col('scopes'), col('frequency', 'jsonb'), col('timezone'), col('next_run_at', 'timestamptz'), col('enabled', 'bool')],
-    rows: SCHEDULES.map((s) => ({ id: s.id, name: s.name, scopes: s.scopes.join(','), frequency: JSON.stringify(s.frequency), timezone: s.timezone, next_run_at: s.nextRunAt, enabled: s.enabled })),
+    columns: [ID, col('run_id'), col('section'), col('rule_code'), col('severity'), col('load_id'), col('summary'), col('detected_at', 'timestamptz')],
+    rows: FINDINGS.map((f) => ({ id: f.id, run_id: f.runId, section: f.section, rule_code: f.ruleCode, severity: f.severity, load_id: f.loadId ?? null, summary: f.summary, detected_at: f.detectedAt })),
   },
   {
     name: 'service_configs',
@@ -98,3 +93,24 @@ export const DB_TABLES: DbTable[] = [
     ],
   },
 ];
+
+// Database ids are UUIDs. The sample sources use short ids (L3, drv-2, R-1042), so each id and foreign key
+// is mapped to a stable UUID per entity kind; references keep pointing at the right rows.
+const TABLE_KIND: Record<string, string> = { organizations: 'org', users: 'user', loads: 'load', load_stops: 'stop', diagnosis_runs: 'run' };
+const FK_KIND: Record<string, string> = { load_id: 'load', driver_id: 'user', driver_user_id: 'user', shipper_id: 'org', carrier_id: 'org', org_id: 'org', load_stop_id: 'stop', run_id: 'run' };
+
+function toUuid(value: DbRow[string], kind: string): DbRow[string] {
+  return typeof value === 'string' && !UUID_RE.test(value) ? uuidFor(`${kind}:${value}`) : value;
+}
+
+export const DB_TABLES: DbTable[] = RAW_TABLES.map((t) => ({
+  ...t,
+  rows: t.rows.map((r) => {
+    const out: DbRow = { ...r };
+    for (const c of t.columns) {
+      if (c.name === 'id') out[c.name] = toUuid(r[c.name], TABLE_KIND[t.name] ?? t.name);
+      else if (FK_KIND[c.name]) out[c.name] = toUuid(r[c.name], FK_KIND[c.name]);
+    }
+    return out;
+  }),
+}));

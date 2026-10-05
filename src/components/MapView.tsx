@@ -3,32 +3,32 @@ import { Circle, CircleMarker, MapContainer, Polyline, TileLayer, Tooltip, useMa
 import type { LatLngBoundsExpression, LatLngExpression } from 'leaflet';
 import { MAP_COLORS } from '../lib/theme';
 import { fmtTime } from '../lib/format';
-import { analyzeLoad } from '../sampleData/analyze';
+import { DRIVERS } from '../sampleData';
+import { analyzeLoad, fenceName } from '../sampleData/analyze';
 import type { Load, Ping, PingContext } from '../types';
 
 interface Props {
   load: Load;
-  visibleCount: number;
   selectedPingId: string | null;
   highlightPingIds: string[];
   highlightPhotoIds: string[];
-  showPlanned: boolean;
   showActual: boolean;
   onSelectPing: (id: string) => void;
 }
 
 const ll = (p: { lat: number; lng: number }): LatLngExpression => [p.lat, p.lng];
 const CTX_COLOR: Record<PingContext, string> = {
-  on_route: MAP_COLORS.navy,
-  pickup_radius: MAP_COLORS.limeDark,
-  delivery_radius: MAP_COLORS.limeDark,
-  off_route: MAP_COLORS.destructive,
+  pickup: MAP_COLORS.limeDark,
+  normal: MAP_COLORS.navy,
+  delivery: MAP_COLORS.destructive,
 };
+const CTX_LABEL: Record<PingContext, string> = { pickup: 'pickup geofence', normal: 'normal', delivery: 'drop-off geofence' };
+const driverName = (id: string): string => DRIVERS.find((d) => d.id === id)?.name ?? id;
 
 function Fit({ load, focus }: { load: Load; focus: Ping | null }): null {
   const map = useMap();
   useEffect(() => {
-    const pts = [...load.plannedRoute, ...load.pings.map((p) => p.location)];
+    const pts = [...load.stops.map((s) => s.location), ...load.pings.map((p) => p.location)];
     const b: LatLngBoundsExpression = [
       [Math.min(...pts.map((p) => p.lat)), Math.min(...pts.map((p) => p.lng))],
       [Math.max(...pts.map((p) => p.lat)), Math.max(...pts.map((p) => p.lng))],
@@ -41,8 +41,8 @@ function Fit({ load, focus }: { load: Load; focus: Ping | null }): null {
   return null;
 }
 
-export function MapView({ load, visibleCount, selectedPingId, highlightPingIds, highlightPhotoIds, showPlanned, showActual, onSelectPing }: Props): JSX.Element {
-  const visible = load.pings.slice(0, visibleCount);
+export function MapView({ load, selectedPingId, highlightPingIds, highlightPhotoIds, showActual, onSelectPing }: Props): JSX.Element {
+  const visible = load.pings;
   const selected = load.pings.find((p) => p.id === selectedPingId) ?? null;
   const hi = new Set(highlightPingIds);
   const a = analyzeLoad(load);
@@ -57,11 +57,9 @@ export function MapView({ load, visibleCount, selectedPingId, highlightPingIds, 
   });
 
   return (
-    <MapContainer center={ll(load.plannedRoute[0])} zoom={7} scrollWheelZoom className="h-[460px] w-full border border-border-strong">
+    <MapContainer center={ll(load.stops[0].location)} zoom={7} scrollWheelZoom className="h-[460px] w-full border border-border-strong">
       <TileLayer attribution="&copy; OpenStreetMap contributors" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
       <Fit load={load} focus={selected} />
-
-      {showPlanned && <Polyline positions={load.plannedRoute.map(ll)} pathOptions={{ color: MAP_COLORS.muted, weight: 5, dashArray: '2 8', opacity: 0.9 }} />}
 
       {load.stops.map((s) => (
         <Circle key={s.id} center={ll(s.location)} radius={s.radiusM} pathOptions={{ color: MAP_COLORS.limeDark, fillColor: MAP_COLORS.lime, fillOpacity: 0.25, weight: 2 }}>
@@ -107,12 +105,12 @@ export function MapView({ load, visibleCount, selectedPingId, highlightPingIds, 
       )}
       {a.frozen.map((f, i) => (
         <Circle key={`fz-${i}`} center={ll(f.pings[0].location)} radius={120} pathOptions={{ color: MAP_COLORS.warning, fillOpacity: 0.15, weight: 2 }}>
-          <Tooltip sticky>Frozen position · {Math.round(f.seconds / 60)} min</Tooltip>
+          <Tooltip sticky>Static location · {Math.round(f.seconds / 60)} min</Tooltip>
         </Circle>
       ))}
       {a.missed.map((m, i) => (
         <CircleMarker key={`ms-${i}`} center={ll(m.after.location)} radius={11} pathOptions={{ color: MAP_COLORS.destructive, fillOpacity: 0, weight: 3 }}>
-          <Tooltip sticky>Geofence {m.transition} missed · {m.stop.dcName}</Tooltip>
+          <Tooltip sticky>Missed geofence ({m.transition}) · {fenceName(m.stop)}</Tooltip>
         </CircleMarker>
       ))}
       {a.dupGroups.map((g, i) => (
@@ -133,7 +131,7 @@ export function MapView({ load, visibleCount, selectedPingId, highlightPingIds, 
             eventHandlers={{ click: () => onSelectPing(p.id) }}
           >
             <Tooltip>
-              {fmtTime(p.recordedAt)} · {p.context.replace('_', ' ')}
+              {fmtTime(p.recordedAt)} · {CTX_LABEL[p.context]}{load.assignments.length > 1 ? ` · ${driverName(p.driverId)}` : ''}
             </Tooltip>
           </CircleMarker>
         );
@@ -157,13 +155,12 @@ export function MapView({ load, visibleCount, selectedPingId, highlightPingIds, 
 
 export function MapLegend(): JSX.Element {
   const items: [string, string][] = [
-    [MAP_COLORS.navy, 'On route'],
-    [MAP_COLORS.limeDark, 'In stop radius'],
-    [MAP_COLORS.destructive, 'Off route'],
-    [MAP_COLORS.warning, 'GPS gap / frozen / highlighted'],
+    [MAP_COLORS.limeDark, 'Ping at pickup geofence'],
+    [MAP_COLORS.navy, 'Normal ping'],
+    [MAP_COLORS.destructive, 'Ping at drop-off geofence'],
+    [MAP_COLORS.warning, 'GPS silence / static location / highlighted'],
     [MAP_COLORS.white, 'Photo (amber = off-time or wrong place)'],
     [MAP_COLORS.navyDark, 'Parked for driver change / new driver start (red = needs review)'],
-    [MAP_COLORS.muted, 'Planned route (dotted)'],
   ];
   return (
     <div className="flex flex-wrap gap-x-4 gap-y-1 border border-t-0 border-border bg-card px-3 py-2 text-xs">

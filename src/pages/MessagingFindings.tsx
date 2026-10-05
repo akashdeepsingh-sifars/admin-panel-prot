@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Link } from 'react-router-dom';
 import { FindingCard } from '../components/FindingCard';
 import { Card, CardHeader, Chip, Empty, PageHeader, Stat, Table, Td } from '../components/ui';
 import { fmtDateTime, pct } from '../lib/format';
+import { loadById } from '../sampleData';
 import { channelLabel } from '../sampleData/reports';
 import { useStore } from '../store';
 import type { Channel } from '../types';
@@ -74,7 +74,7 @@ export function MessagingFindings(): JSX.Element {
               <Td>{channelLabel(i.channel)}</Td>
               <Td>{i.recipient}</Td>
               <Td><code className="text-xs">{i.kind}</code></Td>
-              <Td>{i.loadId ? <Link to={`/diagnostics/runs/${runId}/shipments/${i.loadId}`} className="font-semibold text-navy hover:underline">{i.loadId === 'L3' ? 'FF-10260' : i.loadId}</Link> : '—'}</Td>
+              <Td>{i.loadId ? <span className="font-semibold">{loadById(i.loadId)?.number ?? i.loadId}</span> : '—'}</Td>
               <Td>{i.reason}</Td>
               <Td><code className="text-xs">{i.providerResponse}</code></Td>
             </tr>
