@@ -85,6 +85,9 @@ export interface PhoneState {
   locationPermission: 'always' | 'while_using' | 'denied';
   locationPrecision: 'precise' | 'approximate';
   appState: 'foreground' | 'background';
+  os: 'android' | 'ios';
+  osVersion: string;
+  appVersion: string;
 }
 
 export interface Ping {

@@ -53,9 +53,9 @@ const RAW_TABLES: DbTable[] = [
   {
     name: 'driver_locations',
     description: 'Raw GPS pings from driver phones',
-    columns: [ID, col('load_id'), col('driver_user_id'), col('point_lat', 'numeric'), col('point_lng', 'numeric'), col('accuracy_m', 'int'), col('recorded_at', 'timestamptz'), col('received_at', 'timestamptz'), col('was_offline_queued', 'bool'), col('battery_pct', 'int'), col('is_charging', 'bool'), col('power_save', 'bool'), col('network_type'), col('location_permission'), col('location_context')],
+    columns: [ID, col('load_id'), col('driver_user_id'), col('point_lat', 'numeric'), col('point_lng', 'numeric'), col('accuracy_m', 'int'), col('recorded_at', 'timestamptz'), col('received_at', 'timestamptz'), col('was_offline_queued', 'bool'), col('battery_pct', 'int'), col('is_charging', 'bool'), col('power_save', 'bool'), col('network_type'), col('location_permission'), col('location_context'), col('os'), col('os_version'), col('app_version')],
     rows: LOADS.flatMap((l) =>
-      l.pings.map((p) => ({ id: p.id, load_id: l.id, driver_user_id: p.driverId, point_lat: p.location.lat, point_lng: p.location.lng, accuracy_m: p.accuracyM, recorded_at: p.recordedAt, received_at: p.receivedAt, was_offline_queued: p.offlineQueued, battery_pct: p.phone.batteryPct, is_charging: p.phone.charging, power_save: p.phone.powerSave, network_type: p.phone.network, location_permission: p.phone.locationPermission, location_context: p.context }))
+      l.pings.map((p) => ({ id: p.id, load_id: l.id, driver_user_id: p.driverId, point_lat: p.location.lat, point_lng: p.location.lng, accuracy_m: p.accuracyM, recorded_at: p.recordedAt, received_at: p.receivedAt, was_offline_queued: p.offlineQueued, battery_pct: p.phone.batteryPct, is_charging: p.phone.charging, power_save: p.phone.powerSave, network_type: p.phone.network, location_permission: p.phone.locationPermission, location_context: p.context, os: p.phone.os, os_version: p.phone.osVersion, app_version: p.phone.appVersion }))
     ),
   },
   {

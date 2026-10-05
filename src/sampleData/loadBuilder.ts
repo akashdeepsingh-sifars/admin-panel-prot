@@ -98,7 +98,16 @@ function iso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-function phoneFor(rnd: () => number, t: number, totalT: number, atStop: boolean): PhoneState {
+// OS and OS version come from the driver's device; app version is fixed per driver, with some drivers behind on updates.
+const APP_VERSIONS = ['2.8.1', '2.7.4', '2.8.1', '2.6.0', '2.8.0'];
+
+function deviceInfo(driverId: string): Pick<PhoneState, 'os' | 'osVersion' | 'appVersion'> {
+  const idx = Math.max(0, DRIVERS.findIndex((d) => d.id === driverId));
+  const m = /(Android|iOS)\s+([\d.]+)/.exec(DRIVERS[idx]?.device ?? '');
+  return { os: m?.[1] === 'iOS' ? 'ios' : 'android', osVersion: m?.[2] ?? 'unknown', appVersion: APP_VERSIONS[idx % APP_VERSIONS.length] };
+}
+
+function phoneFor(rnd: () => number, t: number, totalT: number, atStop: boolean, driverId: string): PhoneState {
   const battery = Math.max(6, Math.round(92 - (t / Math.max(totalT, 1)) * 48 + (rnd() - 0.5) * 2));
   return {
     batteryPct: battery,
@@ -108,6 +117,7 @@ function phoneFor(rnd: () => number, t: number, totalT: number, atStop: boolean)
     locationPermission: 'always',
     locationPrecision: 'precise',
     appState: atStop ? 'foreground' : rnd() < 0.15 ? 'foreground' : 'background',
+    ...deviceInfo(driverId),
   };
 }
 
@@ -231,7 +241,7 @@ export function buildLoad(spec: LoadSpec): Load {
       atStop = true;
     }
 
-    let phone = phoneFor(rnd, t, endT, atStop);
+    let phone = phoneFor(rnd, t, endT, atStop, driverAtT(t));
     for (const g of gapWindows) {
       const untilGap = g.startT - t;
       if (untilGap > 0 && untilGap <= 6) phone = applyCause(phone, g.cause);

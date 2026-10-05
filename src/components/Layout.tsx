@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { Database, ListChecks, PlusCircle } from 'lucide-react';
+import { useState } from 'react';
+import { getTimezone, setTimezone, TIMEZONES } from '../lib/format';
 import { cx } from './ui';
 
 const NEW_RUN = '/diagnostics/runs/new';
@@ -13,6 +15,7 @@ const NAV: { to: string; label: string; icon: typeof ListChecks; active: (path: 
 
 export function Layout(): JSX.Element {
   const { pathname } = useLocation();
+  const [tz, setTz] = useState(getTimezone);
   return (
     <div className="flex min-h-screen">
       <aside className="sticky top-0 h-screen w-56 shrink-0 self-start overflow-y-auto bg-navy-dark text-white">
@@ -35,10 +38,22 @@ export function Layout(): JSX.Element {
       </aside>
       <div className="min-w-0 flex-1">
         <div className="border-b border-warning bg-warning-tint px-6 py-1.5 text-xs font-medium text-warning-ink">
-          Prototype · all data on screen is sample data. Nothing here is connected to the backend.
+          <div className="flex items-center gap-4">
+            <span>Prototype · all data on screen is sample data. Nothing here is connected to the backend.</span>
+            <label className="ml-auto flex items-center gap-2 font-semibold">
+              Show times in
+              <select
+                className="border-[1.5px] border-border-strong bg-card px-2 py-0.5 text-xs font-normal text-foreground"
+                value={tz}
+                onChange={(e) => { setTimezone(e.target.value); setTz(e.target.value); }}
+              >
+                {TIMEZONES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+              </select>
+            </label>
+          </div>
         </div>
         <main className="mx-auto max-w-[1400px] px-6 py-5">
-          <Outlet />
+          <Outlet key={tz} />
         </main>
       </div>
     </div>
